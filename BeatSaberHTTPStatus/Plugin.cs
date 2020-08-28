@@ -20,7 +20,7 @@ using IPALogger = IPA.Logging.Logger;
 namespace BeatSaberHTTPStatus {
 	[Plugin(RuntimeOptions.SingleStartInit)]
 	internal class Plugin {
-		private bool initialized;
+		public static Plugin instance {get; private set;}
 
 		private StatusManager statusManager = new StatusManager();
 		private HTTPServer server;
@@ -70,8 +70,10 @@ namespace BeatSaberHTTPStatus {
 
 		[OnStart]
 		public void OnApplicationStart() {
-			if (initialized) return;
-			initialized = true;
+			if (instance != null) return;
+			instance = this;
+
+			PluginTickerScript.TouchInstance();
 
 			server = new HTTPServer(statusManager);
 			server.InitServer();
@@ -113,7 +115,7 @@ namespace BeatSaberHTTPStatus {
 			server.StopServer();
 		}
 
-		public void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
+		public async void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
 			GameStatus gameStatus = statusManager.gameStatus;
 
 			gameStatus.scene = newScene.name;
@@ -202,8 +204,8 @@ namespace BeatSaberHTTPStatus {
 				gameStatus.levelAuthorName = level.levelAuthorName;
 				gameStatus.songBPM = level.beatsPerMinute;
 				gameStatus.noteJumpSpeed = diff.noteJumpMovementSpeed;
-				// 13 is a magical number for the length of "custom_level_"
-				gameStatus.songHash = level.levelID.StartsWith("custom_level_") && !level.levelID.EndsWith(" WIP") ? level.levelID.Substring(13) : null;
+				// 13 is "custom_level_" and 40 is the magic number for the length of the SHA-1 hash
+				gameStatus.songHash = level.levelID.StartsWith("custom_level_") && !level.levelID.EndsWith(" WIP") ? level.levelID.Substring(13, 40) : null;
 				gameStatus.levelId = level.levelID;
 				gameStatus.songTimeOffset = (long) (level.songTimeOffset * 1000f / songSpeedMul);
 				gameStatus.length = (long) (level.beatmapLevelData.audioClip.length * 1000f / songSpeedMul);
@@ -221,7 +223,7 @@ namespace BeatSaberHTTPStatus {
 
 				try {
 					// From https://support.unity3d.com/hc/en-us/articles/206486626-How-can-I-get-pixels-from-unreadable-textures-
-					var texture = level.GetCoverImageTexture2DAsync(CancellationToken.None).Result;
+					var texture = await level.GetCoverImageTexture2DAsync(CancellationToken.None);
 					var active = RenderTexture.active;
 					var temporary = RenderTexture.GetTemporary(
 						texture.width,
@@ -397,8 +399,10 @@ namespace BeatSaberHTTPStatus {
 			acsb.didFinishEvent -= OnNoteWasFullyCut;
 		}
 
-		private void SetNoteCutStatus(NoteData noteData, NoteCutInfo noteCutInfo, bool initialCut) {
+		private void SetNoteCutStatus(NoteData noteData, NoteCutInfo noteCutInfo = null, bool initialCut = true) {
 			GameStatus gameStatus = statusManager.gameStatus;
+
+			gameStatus.ResetNoteCut();
 
 			gameStatus.noteID = noteData.id;
 			gameStatus.noteType = noteData.noteType.ToString();
@@ -406,25 +410,28 @@ namespace BeatSaberHTTPStatus {
 			gameStatus.noteLine = noteData.lineIndex;
 			gameStatus.noteLayer = (int) noteData.noteLineLayer;
 			gameStatus.timeToNextBasicNote = noteData.timeToNextBasicNote;
-			gameStatus.speedOK = noteCutInfo.speedOK;
-			gameStatus.directionOK = noteCutInfo.directionOK;
-			gameStatus.saberTypeOK = noteCutInfo.saberTypeOK;
-			gameStatus.wasCutTooSoon = noteCutInfo.wasCutTooSoon;
-			gameStatus.saberSpeed = noteCutInfo.saberSpeed;
-			gameStatus.saberDirX = noteCutInfo.saberDir[0];
-			gameStatus.saberDirY = noteCutInfo.saberDir[1];
-			gameStatus.saberDirZ = noteCutInfo.saberDir[2];
-			gameStatus.saberType = noteCutInfo.saberType.ToString();
-			gameStatus.swingRating = noteCutInfo.swingRatingCounter == null ? -1 : initialCut ? noteCutInfo.swingRatingCounter.beforeCutRating : noteCutInfo.swingRatingCounter.afterCutRating;
-			gameStatus.timeDeviation = noteCutInfo.timeDeviation;
-			gameStatus.cutDirectionDeviation = noteCutInfo.cutDirDeviation;
-			gameStatus.cutPointX = noteCutInfo.cutPoint[0];
-			gameStatus.cutPointY = noteCutInfo.cutPoint[1];
-			gameStatus.cutPointZ = noteCutInfo.cutPoint[2];
-			gameStatus.cutNormalX = noteCutInfo.cutNormal[0];
-			gameStatus.cutNormalY = noteCutInfo.cutNormal[1];
-			gameStatus.cutNormalZ = noteCutInfo.cutNormal[2];
-			gameStatus.cutDistanceToCenter = noteCutInfo.cutDistanceToCenter;
+
+			if (noteCutInfo != null) {
+				gameStatus.speedOK = noteCutInfo.speedOK;
+				gameStatus.directionOK = noteCutInfo.directionOK;
+				gameStatus.saberTypeOK = noteCutInfo.saberTypeOK;
+				gameStatus.wasCutTooSoon = noteCutInfo.wasCutTooSoon;
+				gameStatus.saberSpeed = noteCutInfo.saberSpeed;
+				gameStatus.saberDirX = noteCutInfo.saberDir[0];
+				gameStatus.saberDirY = noteCutInfo.saberDir[1];
+				gameStatus.saberDirZ = noteCutInfo.saberDir[2];
+				gameStatus.saberType = noteCutInfo.saberType.ToString();
+				gameStatus.swingRating = noteCutInfo.swingRatingCounter == null ? -1 : initialCut ? noteCutInfo.swingRatingCounter.beforeCutRating : noteCutInfo.swingRatingCounter.afterCutRating;
+				gameStatus.timeDeviation = noteCutInfo.timeDeviation;
+				gameStatus.cutDirectionDeviation = noteCutInfo.cutDirDeviation;
+				gameStatus.cutPointX = noteCutInfo.cutPoint[0];
+				gameStatus.cutPointY = noteCutInfo.cutPoint[1];
+				gameStatus.cutPointZ = noteCutInfo.cutPoint[2];
+				gameStatus.cutNormalX = noteCutInfo.cutNormal[0];
+				gameStatus.cutNormalY = noteCutInfo.cutNormal[1];
+				gameStatus.cutNormalZ = noteCutInfo.cutNormal[2];
+				gameStatus.cutDistanceToCenter = noteCutInfo.cutDistanceToCenter;
+			}
 		}
 
 		public void OnNoteWasMissed(NoteData noteData, int multiplier) {
@@ -432,15 +439,17 @@ namespace BeatSaberHTTPStatus {
 
 			statusManager.gameStatus.batteryEnergy = gameEnergyCounter.batteryEnergy;
 
+			SetNoteCutStatus(noteData);
+
 			if (noteData.noteType == NoteType.Bomb) {
 				statusManager.gameStatus.passedBombs++;
 
-				statusManager.EmitStatusUpdate(ChangedProperties.Performance, "bombMissed");
+				statusManager.EmitStatusUpdate(ChangedProperties.PerformanceAndNoteCut, "bombMissed");
 			} else {
 				statusManager.gameStatus.passedNotes++;
 				statusManager.gameStatus.missedNotes++;
 
-				statusManager.EmitStatusUpdate(ChangedProperties.Performance, "noteMissed");
+				statusManager.EmitStatusUpdate(ChangedProperties.PerformanceAndNoteCut, "noteMissed");
 			}
 		}
 
@@ -485,11 +494,13 @@ namespace BeatSaberHTTPStatus {
 		}
 
 		public static long GetCurrentTime() {
-			return (long) (DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).Ticks / TimeSpan.TicksPerMillisecond);
+			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		}
 
-		public void OnFixedUpdate() {}
-		public void OnSceneLoaded(Scene scene, LoadSceneMode mode) {}
-		public void OnSceneUnloaded(Scene scene) {}
+		public class PluginTickerScript : PersistentSingleton<PluginTickerScript> {
+			public void Update() {
+				if (Plugin.instance != null) Plugin.instance.OnUpdate();
+			}
+		}
 	}
 }
